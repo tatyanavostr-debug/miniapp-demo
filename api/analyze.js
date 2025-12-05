@@ -1,15 +1,33 @@
 export default async function handler(req, res) {
   try {
-    // Cчитываем JSON в serverless-режиме
-    const body = await new Promise((resolve, reject) => {
-      let data = "";
-      req.on("data", chunk => (data += chunk));
-      req.on("end", () => resolve(data));
-      req.on("error", reject);
-    });
+    let name = "";
+    let date = "";
 
-    const { name, date } = JSON.parse(body || "{}");
+    // 1) Проверяем GET параметры
+    const url = new URL(req.url, `https://${req.headers.host}`);
+    const qName = url.searchParams.get("name");
+    const qDate = url.searchParams.get("date");
 
+    if (qName && qDate) {
+      name = qName;
+      date = qDate;
+    } else {
+      // 2) Если не GET — читаем тело POST-запроса
+      const body = await new Promise((resolve, reject) => {
+        let data = "";
+        req.on("data", chunk => (data += chunk));
+        req.on("end", () => resolve(data));
+        req.on("error", reject);
+      });
+
+      if (body) {
+        const parsed = JSON.parse(body);
+        name = parsed.name;
+        date = parsed.date;
+      }
+    }
+
+    // Если нет имени или даты — ошибка
     if (!name || !date) {
       res.statusCode = 400;
       res.setHeader("Content-Type", "application/json");
@@ -18,15 +36,15 @@ export default async function handler(req, res) {
     }
 
     const openAIKey = process.env.OPENAI_API_KEY;
-
     if (!openAIKey) {
-      console.error("Нет переменной OPENAI_API_KEY!");
       res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: "No API key on server" }));
       return;
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Вызов OpenAI
+    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -38,7 +56,7 @@ export default async function handler(req, res) {
           {
             role: "system",
             content:
-              "Ты даёшь мягкие, короткие и доброжелательные персональные трактовки по дате рождения без эзотерики и мистики. Формат 4–6 предложений, спокойный аналитичный тон."
+              "Ты даёшь мягкие, короткие и доброжелательные персональные трактовки по дате рождения без эзотерики и мистики. 4–6 предложений, спокойный аналитичный тон."
           },
           {
             role: "user",
@@ -48,11 +66,11 @@ export default async function handler(req, res) {
       })
     });
 
-    const data = await response.json();
+    const data = await aiResponse.json();
 
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ result: data.choices?.[0]?.message?.content || "Модель не дала ответа" }));
+    res.end(JSON.stringify({ result: data.choices?.[0]?.message?.content || "Нет ответа от модели" }));
 
   } catch (err) {
     console.error("SERVER ERROR:", err);
