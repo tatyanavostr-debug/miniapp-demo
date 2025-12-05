@@ -1,11 +1,15 @@
+import crypto from "crypto";
+
 export default async function handler(req, res) {
   try {
     let name = "", date = "";
 
+    // GET
     const url = new URL(req.url, `https://${req.headers.host}`);
     name = url.searchParams.get("name");
     date = url.searchParams.get("date");
 
+    // POST fallback
     if (!name || !date) {
       const body = await new Promise((resolve, reject) => {
         let data = "";
@@ -23,65 +27,84 @@ export default async function handler(req, res) {
 
     if (!name || !date) {
       res.statusCode = 400;
-      res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: "Missing name or date" }));
       return;
     }
 
-    const key = process.env.OPENAI_API_KEY;
-    if (!key) {
+    // GigaChat keys
+    const apiId = process.env.GIGACHAT_API_ID;
+    const apiSecret = process.env.GIGACHAT_API_SECRET;
+
+    if (!apiId || !apiSecret) {
       res.statusCode = 500;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: "No API key found on server" }));
+      res.end(JSON.stringify({ error: "Missing GigaChat credentials" }));
       return;
     }
 
-    // gpt-4.1 endpoints
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    // === 1) Получаем access_token ===
+    const tokenResp = await fetch("https://ngw.devices.sberbank.ru:9443/api/v2/oauth", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": "Basic " + Buffer.from(`${apiId}:${apiSecret}`).toString("base64"),
+        "RqUID": crypto.randomUUID()
+      },
+      body: "scope=GIGACHAT_API_PERS"
+    });
+
+    const tokenJSON = await tokenResp.json();
+    const token = tokenJSON.access_token;
+
+    if (!token) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: "Failed to get access_token", raw: tokenJSON }));
+      return;
+    }
+
+    // === 2) Запрос к модели ===
+    const modelResp = await fetch("https://gigachat.devices.sberbank.ru/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${key}`
+        "Authorization": `Bearer ${token}`
       },
       body: JSON.stringify({
-        model: "gpt-4.1-mini",
-        input: [
+        model: "GigaChat",
+        messages: [
           {
             role: "system",
-            content: "Ты даёшь мягкий, короткий, доброжелательный персональный анализ по дате рождения. 4–6 предложений. Без эзотерики, без мистики."
+            content: "Ты пишешь персональный премиальный анализ по дате рождения. Стиль мягкий, аккуратный, уважающий. Без мистики, эзотерики, гороскопов и предсказаний. 4–6 предложений."
           },
           {
             role: "user",
             content: `Имя: ${name}. Дата рождения: ${date}. Дай характеристику.`
           }
-        ]
+        ],
+        max_tokens: 250,
+        temperature: 0.8
       })
     });
 
-    const data = await response.json();
-    console.log("RAW:", data);
+    const modelJSON = await modelResp.json();
 
-    // правильно извлекаем текст
-    const result =
-      data.output_text ||
-      data.output?.[0]?.content ||
-      data.choices?.[0]?.message?.content ||
+    const text =
+      modelJSON?.choices?.[0]?.message?.content ||
       null;
 
-    if (!result) {
+    if (!text) {
       res.statusCode = 500;
-      res.end(JSON.stringify({ error: "No text extracted", raw: data }));
+      res.end(JSON.stringify({ error: "GigaChat returned no text", raw: modelJSON }));
       return;
     }
 
+    // SUCCESS
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ result }));
+    res.end(JSON.stringify({ result: text }));
 
   } catch (err) {
     console.error("SERVER ERROR:", err);
     res.statusCode = 500;
-    res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: "Server error" }));
   }
 }
