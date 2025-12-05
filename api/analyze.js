@@ -3,7 +3,7 @@ export default async function handler(req, res) {
     let name = "";
     let date = "";
 
-    // 1) Проверяем GET параметры
+    // 1) Читаем GET параметры
     const url = new URL(req.url, `https://${req.headers.host}`);
     const qName = url.searchParams.get("name");
     const qDate = url.searchParams.get("date");
@@ -12,7 +12,7 @@ export default async function handler(req, res) {
       name = qName;
       date = qDate;
     } else {
-      // 2) Если не GET — читаем тело POST-запроса
+      // 2) Читаем тело POST
       const body = await new Promise((resolve, reject) => {
         let data = "";
         req.on("data", chunk => (data += chunk));
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Если нет имени или даты — ошибка
+    // Если данных всё ещё нет
     if (!name || !date) {
       res.statusCode = 400;
       res.setHeader("Content-Type", "application/json");
@@ -43,20 +43,19 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Вызов OpenAI
-    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Запрос к OpenAI
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${openAIKey}`
       },
       body: JSON.stringify({
-        model: "gpt-4.1-mini",
+        model: "gpt-5.1-mini",
         messages: [
           {
             role: "system",
-            content:
-              "Ты даёшь мягкие, короткие и доброжелательные персональные трактовки по дате рождения без эзотерики и мистики. 4–6 предложений, спокойный аналитичный тон."
+            content: "Ты даёшь мягкие, короткие, доброжелательные персональные трактовки по дате рождения. 4–6 предложений. Спокойный аналитичный тон. Без эзотерики."
           },
           {
             role: "user",
@@ -66,14 +65,25 @@ export default async function handler(req, res) {
       })
     });
 
-    const data = await aiResponse.json();
+    const data = await response.json();
+    console.log("OpenAI API Raw:", data);
+
+    const result = data.choices?.[0]?.message?.content;
+
+    if (!result) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Empty response from model" }));
+      return;
+    }
 
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ result: data.choices?.[0]?.message?.content || "Нет ответа от модели" }));
+    res.end(JSON.stringify({ result }));
 
-  } catch (err) {
-    console.error("SERVER ERROR:", err);
+  } catch (error) {
+    console.error("SERVER ERROR:", error);
+
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: "Server error" }));
