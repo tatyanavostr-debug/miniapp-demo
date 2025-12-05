@@ -2,6 +2,7 @@ export default async function handler(req, res) {
   try {
     let name = "", date = "";
 
+    // GET parameters
     const url = new URL(req.url, `https://${req.headers.host}`);
     const qName = url.searchParams.get("name");
     const qDate = url.searchParams.get("date");
@@ -10,12 +11,14 @@ export default async function handler(req, res) {
       name = qName;
       date = qDate;
     } else {
+      // POST body
       const body = await new Promise((resolve, reject) => {
         let data = "";
-        req.on("data", chunk => (data += chunk));
+        req.on("data", chunk => data += chunk);
         req.on("end", () => resolve(data));
         req.on("error", reject);
       });
+
       if (body) {
         const parsed = JSON.parse(body);
         name = parsed.name;
@@ -24,42 +27,66 @@ export default async function handler(req, res) {
     }
 
     if (!name || !date) {
-      return new Response(JSON.stringify({ error: "Missing name or date" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Missing name or date" }));
+      return;
     }
 
-    const openAIKey = process.env.OPENAI_API_KEY;
-    if (!openAIKey) {
-      return new Response(JSON.stringify({ error: "No API key on server" }), { status: 500, headers: { "Content-Type": "application/json" } });
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "No API key found on server" }));
+      return;
     }
 
-    const apiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    // ******* ВАЖНЫЙ МОМЕНТ *******
+    // GPT-5.1 вызывается через /v1/responses
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${openAIKey}`
+        "Authorization": `Bearer ${key}`
       },
       body: JSON.stringify({
-        model: "gpt-3.5-turbo",
-        messages: [
-          { role: "system", content: "Дай короткий, дружелюбный, позитивный комментарий по дате рождения." },
-          { role: "user", content: `Имя: ${name}. Дата рождения: ${date}.` }
-        ],
-        max_tokens: 150
+        model: "gpt-5.1-mini",
+        input: [
+          {
+            role: "system",
+            content: "Ты даёшь мягкий, короткий, доброжелательный персональный анализ по дате рождения. 4–6 предложений. Без мистики."
+          },
+          {
+            role: "user",
+            content: `Имя: ${name}. Дата рождения: ${date}. Дай характеристику.`
+          }
+        ]
       })
     });
 
-    const data = await apiRes.json();
-    console.log("API response:", data);
+    const data = await response.json();
+    console.log("RAW MODEL RESPONSE:", data);
 
-    const result = data.choices?.[0]?.message?.content;
-    if (!result) {
-      return new Response(JSON.stringify({ error: "Empty response from model", raw: data }), { status: 500, headers: { "Content-Type": "application/json" } });
+    const text =
+      data.output_text ||
+      data.output || 
+      data.choices?.[0]?.message?.content;
+
+    if (!text) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Empty response", raw: data }));
+      return;
     }
 
-    return new Response(JSON.stringify({ result }), { status: 200, headers: { "Content-Type": "application/json" } });
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ result: text }));
 
   } catch (err) {
     console.error("SERVER ERROR:", err);
-    return new Response(JSON.stringify({ error: "Server error" }), { status: 500, headers: { "Content-Type": "application/json" } });
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Server error" }));
   }
 }
