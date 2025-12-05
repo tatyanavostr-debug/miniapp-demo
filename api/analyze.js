@@ -1,18 +1,16 @@
-export default async function handler(req, res) {
-  try {
-    // Читаем тело запроса (JSON)
-    let body = "";
-    for await (const chunk of req) {
-      body += chunk;
-    }
+export const config = {
+  runtime: "edge",
+};
 
-    const { name, date } = JSON.parse(body || "{}");
+export default async function handler(req) {
+  try {
+    const { name, date } = await req.json();
 
     if (!name || !date) {
-      res.statusCode = 400;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: "Missing name or date" }));
-      return;
+      return new Response(
+        JSON.stringify({ error: "Missing name or date" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
     }
 
     const openAIKey = process.env.OPENAI_API_KEY;
@@ -29,7 +27,7 @@ export default async function handler(req, res) {
           {
             role: "system",
             content:
-              "Ты даёшь мягкие, короткие и доброжелательные персональные трактовки по дате рождения без эзотерики и предсказаний. Отвечай спокойно, 4–6 предложений, без лишней мистики."
+              "Ты даёшь мягкие, короткие и доброжелательные персональные трактовки по дате рождения без эзотерики и мистики. 4–6 предложений, мягкий аналитичный тон."
           },
           {
             role: "user",
@@ -41,14 +39,21 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    res.statusCode = 200;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ result: data.choices?.[0]?.message?.content || "Нет ответа от AI" }));
-
-  } catch (error) {
-    console.error("SERVER ERROR:", error);
-    res.statusCode = 500;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ error: "Server error" }));
+    return new Response(
+      JSON.stringify({ result: data.choices?.[0]?.message?.content || "Нет ответа от модели" }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+  } catch (err) {
+    console.error("SERVER ERROR:", err);
+    return new Response(
+      JSON.stringify({ error: "Server error" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
   }
 }
