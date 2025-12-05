@@ -19,7 +19,8 @@ document.getElementById("sendData").addEventListener("click", async function () 
     const data = await response.json();
 
     if (data.result) {
-      document.getElementById("result").innerHTML = `<strong>${name}</strong>, вот ваш персональный анализ:<br><br>${data.result}`;
+      document.getElementById("result").innerHTML =
+        `<strong>${name}</strong>, вот ваш персональный анализ:<br><br>${data.result}`;
     } else {
       document.getElementById("result").innerText = "Ошибка при получении ответа от сервера.";
     }
