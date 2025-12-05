@@ -2,12 +2,10 @@ export default async function handler(req, res) {
   try {
     let name = "", date = "";
 
-    // Query params
     const url = new URL(req.url, `https://${req.headers.host}`);
     name = url.searchParams.get("name");
     date = url.searchParams.get("date");
 
-    // POST body fallback
     if (!name || !date) {
       const body = await new Promise((resolve, reject) => {
         let data = "";
@@ -38,7 +36,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    // gpt-4.1 endpoints
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -46,10 +45,10 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "gpt-4.1-mini",
-        messages: [
+        input: [
           {
             role: "system",
-            content: "Ты даёшь мягкий, короткий, доброжелательный персональный анализ по дате рождения. 4–6 предложений. Без эзотерики и мистики."
+            content: "Ты даёшь мягкий, короткий, доброжелательный персональный анализ по дате рождения. 4–6 предложений. Без эзотерики, без мистики."
           },
           {
             role: "user",
@@ -60,14 +59,24 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
+    console.log("RAW:", data);
 
-    const text =
+    // правильно извлекаем текст
+    const result =
+      data.output_text ||
+      data.output?.[0]?.content ||
       data.choices?.[0]?.message?.content ||
-      "Модель не дала текстового ответа";
+      null;
+
+    if (!result) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: "No text extracted", raw: data }));
+      return;
+    }
 
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ result: text }));
+    res.end(JSON.stringify({ result }));
 
   } catch (err) {
     console.error("SERVER ERROR:", err);
