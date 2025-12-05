@@ -1,10 +1,13 @@
 export default async function handler(req, res) {
   try {
-    // собираем имя и дату
-    const url = new URL(req.url, `https://${req.headers.host}`);
-    let name = url.searchParams.get("name");
-    let date = url.searchParams.get("date");
+    let name = "", date = "";
 
+    // Query params
+    const url = new URL(req.url, `https://${req.headers.host}`);
+    name = url.searchParams.get("name");
+    date = url.searchParams.get("date");
+
+    // POST body fallback
     if (!name || !date) {
       const body = await new Promise((resolve, reject) => {
         let data = "";
@@ -12,11 +15,12 @@ export default async function handler(req, res) {
         req.on("end", () => resolve(data));
         req.on("error", reject);
       });
-      try {
+
+      if (body) {
         const parsed = JSON.parse(body || "{}");
         name = parsed.name;
         date = parsed.date;
-      } catch (e) {}
+      }
     }
 
     if (!name || !date) {
@@ -30,27 +34,26 @@ export default async function handler(req, res) {
     if (!key) {
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: "No API key on server" }));
+      res.end(JSON.stringify({ error: "No API key found on server" }));
       return;
     }
 
-    // отправляем запрос как есть
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${key}`
       },
       body: JSON.stringify({
-        model: "gpt-5.1-mini",
-        input: [
+        model: "gpt-4.1-mini",
+        messages: [
           {
             role: "system",
-            content: "Дай мягкое, короткое описание по дате рождения."
+            content: "Ты даёшь мягкий, короткий, доброжелательный персональный анализ по дате рождения. 4–6 предложений. Без эзотерики и мистики."
           },
           {
             role: "user",
-            content: `Имя: ${name}. Дата рождения: ${date}.`
+            content: `Имя: ${name}. Дата рождения: ${date}. Дай характеристику.`
           }
         ]
       })
@@ -58,14 +61,18 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // !!! возвращаем сырой ответ целиком
-    res.statusCode = response.status;
+    const text =
+      data.choices?.[0]?.message?.content ||
+      "Модель не дала текстового ответа";
+
+    res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify(data, null, 2));
+    res.end(JSON.stringify({ result: text }));
 
   } catch (err) {
+    console.error("SERVER ERROR:", err);
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ error: "SERVER CRASH", details: String(err) }));
+    res.end(JSON.stringify({ error: "Server error" }));
   }
 }
